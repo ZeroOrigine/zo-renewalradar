@@ -114,7 +114,7 @@ export async function POST(request: Request) {
             ? `\nLast safe day to cancel: ${row.cancel_by_date}.`
             : ''
         const subject = `${row.vendor_name} renews on ${row.next_renewal_date}`
-        const text = `Hi${profile.full_name ? ` ${profile.full_name}` : ''},\n\n${row.vendor_name} renews on ${row.next_renewal_date} (${row.currency} ${row.amount}).${cancelLine}\n\nReview or cancel it: ${appUrl}/renewals/${row.id}\n\n— RenewalRadar`\n
+        const text = `Hi${profile.full_name ? ` ${profile.full_name}` : ''},\n\n${row.vendor_name} renews on ${row.next_renewal_date} (${row.currency} ${row.amount}).${cancelLine}\n\nReview or cancel it: ${appUrl}/renewals/${row.id}\n\n— RenewalRadar`
         const ok = await sendAlertEmail(profile.email, subject, text)
         if (!ok) {
           skipped += 1
