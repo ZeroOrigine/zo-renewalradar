@@ -3,6 +3,11 @@
 > Docs fragment owned by the auth_payments stage. The docs assembler concatenates
 > numbered sections into the final SUPABASE-SETUP.md. Do not duplicate this content
 > in other sections.
+>
+> PATCH v2 (self-validation): flow-contract items 4.3(4) and 4.7(3) previously said
+> checkout success lands on `/dashboard?checkout=success`. That was stale — config
+> PATCH v2 moved CHECKOUT_SUCCESS_PATH to `/billing?checkout=success`, and the
+> /billing page owns the celebration. Verification steps corrected to match code.
 
 ## 4.1 Environment variables (also emitted as `env.auth_payments.json`)
 
@@ -47,7 +52,9 @@ All vars must be set as **non-secret** on Netlify (secret vars are invisible at 
    - reads `?intent=pro|business` and immediately surfaces the upgrade → `POST /api/checkout`;
    - reads `?checkout=canceled` → friendly "no charge was made" note;
    - renders current plan + a "Manage billing" button → `POST /api/billing/portal`.
-4. **core step's `/dashboard`** should celebrate `?checkout=success` (upgrade confirmation moment).
+4. **`/billing` also owns the success moment**: `CHECKOUT_SUCCESS_PATH` is
+   `/billing?checkout=success` (config PATCH v2), and the /billing page renders the
+   upgrade celebration banner. `/dashboard` requires NO checkout-param handling.
 5. Plan data (names, prices, features, limits) comes ONLY from `@/lib/stripe/config` —
    never hardcode prices in UI. It matches the seeded `renewalradar_plans` rows
    (free / pro $9|$89 / business $29|$290).
@@ -100,9 +107,14 @@ HTML GETs to protected APIs are redirected by middleware to `/login?next=<path>`
 
 1. `/signup?plan=pro` → create account → confirmation email arrives (RenewalRadar-branded).
 2. Click link → lands on production `/billing?intent=pro` (not localhost) with upgrade surfaced.
-3. Complete checkout with `4242 4242 4242 4242` (test mode) → `/dashboard?checkout=success`.
+3. Complete checkout with `4242 4242 4242 4242` (test mode) → lands on
+   `/billing?checkout=success` showing the "Welcome to Pro" celebration banner.
 4. `renewalradar_subscriptions` row: `plan='pro'`, `status='active'`, customer + subscription ids set.
 5. `renewalradar_payments` has a `succeeded` receipt row.
 6. `POST /api/billing/portal` → portal opens → cancel → row downgrades to `plan='free'`.
 7. Sign out → `/dashboard` redirects to `/login?next=/dashboard` → sign back in → no redirect loops.
 8. Google + GitHub OAuth round-trips land on `/dashboard`.
+9. Paywall backstop check: as a Free user with 5 tracked renewals, a direct PostgREST
+   insert into `renewalradar_renewals` (using the user's own JWT + anon key) must be
+   rejected by the `renewalradar_renewals_enforce_limit` trigger, and a direct profile
+   insert attempting `role='admin'` must fail with a column permission error.
