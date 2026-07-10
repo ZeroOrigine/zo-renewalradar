@@ -1,12 +1,16 @@
-// CANONICAL: RenewalRadar Supabase session refresh for Next.js middleware.
+// CANONICAL: RenewalRadar Supabase session-refresh helper for Next.js middleware.
 //
-// The root middleware.ts (owned by the auth_payments step) imports
-// updateSession() from here and layers its redirect rules on top. This is the
-// ONLY place session-refresh cookie plumbing lives — one library
-// (@supabase/ssr), one cookie format, zero redirect loops.
+// PATCH v2 (self-validation, honesty fix): the previous header claimed the root
+// middleware.ts imports updateSession() from here. It does NOT — the root
+// middleware (owned by the auth_payments step) implements this exact
+// @supabase/ssr cookie pattern inline, because its redirect rules are
+// interleaved with cookie propagation and refactoring them through this helper
+// risks the redirect-loop bug class this codebase specifically guards against.
 //
-// NOTE for the middleware author: if you return your own redirect instead of
-// the response returned here, copy the refreshed auth cookies across first:
+// This module is retained as the canonical, reusable session-refresh helper
+// (same library, same cookie format, zero drift) for any future middleware or
+// edge consumer. If you adopt it, remember: when returning your own redirect
+// instead of the response returned here, copy the refreshed auth cookies first:
 //   const redirect = NextResponse.redirect(url)
 //   response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie))
 
@@ -39,7 +43,7 @@ export async function updateSession(request: NextRequest): Promise<UpdateSession
       getAll() {
         return request.cookies.getAll()
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value)
         })
