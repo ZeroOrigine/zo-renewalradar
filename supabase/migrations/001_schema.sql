@@ -538,3 +538,113 @@ CREATE INDEX IF NOT EXISTS idx_renewalradar_renewals_user_status
 -- from anon/authenticated; plans are seeded before the signup trigger's
 -- subscriptions.plan -> plans.slug FK can ever fire.
 -- ============================================================================
+
+-- Self-validation patches
+-- ============================================================================
+-- PATCH: self-validation pass 4 — two real security/business gaps closed
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- GAP 1 (CRITICAL — privilege escalation via column-level INSERT on profiles).
+-- Section 7 hardened UPDATE but left the default full-column INSERT grant.
+-- RLS's INSERT policy checks only id = auth.uid() — it does not gate columns.
+-- Because the signup trigger swallows exceptions by design, a user whose
+-- profile row was never created could self-provision one via direct PostgREST:
+--   INSERT INTO renewalradar_profiles (id, role) VALUES (auth.uid(), 'admin')
+-- → instant admin (renewalradar_is_admin() returns true, unlocking every
+-- admin policy). Column-level INSERT closes it. The SECURITY DEFINER signup
+-- trigger and the service role are unaffected; ensureProfile() only inserts
+-- granted columns, so app self-healing keeps working unchanged.
+-- ----------------------------------------------------------------------------
+REVOKE INSERT ON renewalradar_profiles FROM anon, authenticated;
+GRANT INSERT (id, email, full_name, avatar_url, default_currency, timezone,
+              default_alert_days, onboarding_completed)
+  ON renewalradar_profiles TO authenticated;
+
+-- ----------------------------------------------------------------------------
+-- GAP 2 (HIGH — paywall bypass). The free-plan renewal cap was enforced ONLY
+-- in POST /api/renewals. The anon key is public by design, so any signed-in
+-- user can talk to PostgREST directly and insert unlimited renewals — RLS
+-- allows it because the rows are their own. This trigger is the DB backstop:
+--  - the API keeps its friendly PLAN_LIMIT_REACHED pre-check (user-facing path);
+--  - only NET-NEW tracked items are blocked — existing tracked renewals are
+--    never rejected (matches the pricing-page promise after a downgrade);
+--  - reactivation bypass (insert as 'canceled', flip to 'active') is counted.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION renewalradar_enforce_plan_limit()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_max   integer;
+  v_count integer;
+BEGIN
+  -- Only writes that ADD a tracked item are subject to the cap.
+  IF NEW.status NOT IN ('active', 'paused') THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status IN ('active', 'paused') THEN
+    RETURN NEW;  -- already counted; not a net increase (cron roll, edits, etc.)
+  END IF;
+
+  -- Effective plan cap; lapsed subscriptions fall back to free limits
+  -- (mirrors lib/db/entitlements.ts ENTITLED_STATUSES exactly).
+  SELECT p.max_renewals INTO v_max
+  FROM public.renewalradar_subscriptions s
+  JOIN public.renewalradar_plans p
+    ON p.slug = CASE
+                  WHEN s.status IN ('active', 'trialing', 'past_due') THEN s.plan
+                  ELSE 'free'
+                END
+  WHERE s.user_id = NEW.user_id;
+
+  IF NOT FOUND THEN
+    -- Subscription row missing (trigger raced) → free-tier default.
+    SELECT max_renewals INTO v_max
+    FROM public.renewalradar_plans
+    WHERE slug = 'free';
+  END IF;
+
+  IF v_max IS NULL THEN
+    RETURN NEW;  -- unlimited plan
+  END IF;
+
+  SELECT count(*) INTO v_count
+  FROM public.renewalradar_renewals
+  WHERE user_id = NEW.user_id
+    AND status IN ('active', 'paused')
+    AND (TG_OP = 'INSERT' OR id <> NEW.id);
+
+  IF v_count >= v_max THEN
+    RAISE EXCEPTION 'Plan limit reached: this plan tracks up to % renewals.', v_max
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER renewalradar_renewals_enforce_limit
+  BEFORE INSERT OR UPDATE ON renewalradar_renewals
+  FOR EACH ROW EXECUTE FUNCTION renewalradar_enforce_plan_limit();
+
+-- Same bypass class, smaller blast radius: hard-cap alert windows in the DB.
+-- Zod already caps API input at 6; this stops direct-REST rows carrying huge
+-- arrays (unbounded alert volume). cardinality() — NOT array_length() — is
+-- used on purpose: array_length('{}') is NULL and NULL passes CHECK.
+-- App writes always satisfy this (Zod min 1 / max 6; defaults are length 3).
+ALTER TABLE renewalradar_renewals
+  ADD CONSTRAINT renewalradar_renewals_alert_days_cap
+  CHECK (cardinality(alert_days_before) BETWEEN 1 AND 6);
+
+-- ----------------------------------------------------------------------------
+-- Re-verified this pass (no change required): RLS enabled + policies on all 5
+-- tables; renewals INSERT WITH CHECK pins user_id = auth.uid(); billing tables
+-- remain service-role-write-only; subscriptions/payments have no client write
+-- policies (deny-by-default confirmed); roll function EXECUTE stays revoked
+-- from anon/authenticated; every FK and hot path indexed; SECURITY DEFINER
+-- functions pin search_path; users mutating their own last_alert_at via REST
+-- can only suppress their OWN alerts (self-harm, not a boundary) — accepted.
+-- ============================================================================
