@@ -34,10 +34,10 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
+    "node_modules",
+    "src",
     "google-sheets",
     "n8n-workflows",
-    "node_modules",
-    "setup-sections",
-    "src"
+    "setup-sections"
   ]
 }
