@@ -524,3 +524,17 @@ CREATE INDEX IF NOT EXISTS idx_renewalradar_renewals_user_status
 -- every hot path (list, alert sweep, roll scan, plan-limit count); signup
 -- trigger is non-blocking; roll function EXECUTE revoked from end users.
 -- No SQL changes required.
+
+
+-- Self-validation patches
+-- ============================================================================
+-- Self-validation pass 3: NO schema changes required.
+-- Re-verified: RLS enabled with policies on all 5 tables; column-level UPDATE
+-- grants on profiles (role/email/id immutable to end users); billing tables
+-- are service-role-write-only by design; every FK and hot query path is
+-- indexed (user lists, alert sweep, roll scan, plan-limit count); generated
+-- columns (cancel_by_date, monthly_amount) use immutable expressions;
+-- SECURITY DEFINER functions pin search_path; roll function EXECUTE revoked
+-- from anon/authenticated; plans are seeded before the signup trigger's
+-- subscriptions.plan -> plans.slug FK can ever fire.
+-- ============================================================================
