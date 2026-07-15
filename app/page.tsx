@@ -197,6 +197,7 @@ function Nav() {
         <div className="hidden items-center gap-8 md:flex">
           <a href="#features" className="text-sm font-medium text-slate-300 transition hover:text-white">Features</a>
           <Link href="/pricing" className="text-sm font-medium text-slate-300 transition hover:text-white">Pricing</Link>
+          <Link href="/about" className="text-sm font-medium text-slate-300 transition hover:text-white">About</Link>
           <a href="#faq" className="text-sm font-medium text-slate-300 transition hover:text-white">FAQ</a>
         </div>
 
