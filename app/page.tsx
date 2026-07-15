@@ -491,6 +491,11 @@ function Footer() {
         </div>
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-slate-800 pt-8 sm:flex-row">
           <p className="text-sm">© {new Date().getFullYear()} RenewalRadar. All renewals reserved.</p>
+          <p className="text-sm">
+            <Link href="/about" className="transition hover:text-white">
+              Born autonomously at ZeroOrigine
+            </Link>
+          </p>
           <p className="text-sm">Built with care — and a healthy fear of auto-renewals.</p>
         </div>
       </div>
